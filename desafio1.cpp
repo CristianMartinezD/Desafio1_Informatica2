@@ -9,14 +9,13 @@ const int pinBotonInicio = 7;        // Botón para iniciar la adquisición de d
 const int pinBotonMostrar = 8;       // Botón para mostrar información
 
 // Variables para la adquisición de señal
-float *amplitudes;   // Puntero que apunta a un arreglo dinámico de amplitudes
-int tamanoMuestras = 100;  // Número de muestras para la señal
+float* amplitudes;   // Puntero para el arreglo dinámico de amplitudes
+int tamanoMuestras = 40;  // Número de muestras para la señal
 float amplitudMax = 0;
 float amplitudMin = 1023;
 float amplitud = 0;
 float frecuencia = 0;
 unsigned long tiempoAnterior = 0;
-bool adquisicionIniciada = false;
 String formaOnda = "Desconocida";  // Variable para guardar la forma de la onda
 
 // Variables de control de pantalla
@@ -34,30 +33,63 @@ void setup() {
 
   // Inicializar memoria dinámica para las amplitudes
   amplitudes = new float[tamanoMuestras];  // Reserva memoria para el arreglo dinámico
+  
+  // Inicializar comunicación serial
+  Serial.begin(9600);  // Configura la velocidad de comunicación serial a 9600 baudios
 }
+
+
+
+// Función principal que corre en bucle
+void loop() {
+  // Verificar si el botón de inicio fue presionado (se leerá LOW cuando esté presionado)
+  if (digitalRead(pinBotonInicio) == LOW) {
+    lcd.clear();
+    lcd.print("Adquiriendo...");
+    adquirirSenal();  // Ahora adquirimos las 40 muestras cuando se presiona el botón
+    delay(200);  // Pequeño retardo para evitar lecturas múltiples al presionar el botón
+  }
+
+  // Verificar si el botón de mostrar fue presionado
+  if (digitalRead(pinBotonMostrar) == LOW) {
+    mostrarResultados();  // Mostrar los resultados en pantalla
+    delay(200);  // Pequeño retardo para evitar lecturas múltiples
+  }
+}
+
+
+
 
 // Función para la adquisición de la señal analógica
 void adquirirSenal() {
-  static int indice = 0;  // Para controlar el índice del arreglo de amplitudes
+  // Leer 40 muestras consecutivamente
+  for (int i = 0; i < tamanoMuestras; i++) {
+    // Lee el valor de la señal analógica y lo almacena en el arreglo
+    amplitudes[i] = analogRead(pinEntradaAnalogica);
 
-  // Lee el valor de la señal analógica y lo almacena en el arreglo
-  amplitudes[indice] = analogRead(pinEntradaAnalogica);  
-  if (amplitudes[indice] > amplitudMax) {
-    amplitudMax = amplitudes[indice];  // Actualizar valor máximo
-  }
-  if (amplitudes[indice] < amplitudMin) {
-    amplitudMin = amplitudes[indice];  // Actualizar valor mínimo
-  }
+    // Actualizar el valor máximo y mínimo de la señal
+    if (amplitudes[i] > amplitudMax) {
+      amplitudMax = amplitudes[i];  // Actualizar valor máximo
+    }
+    if (amplitudes[i] < amplitudMin) {
+      amplitudMin = amplitudes[i];  // Actualizar valor mínimo
+    }
 
-  // Calcular el tiempo entre picos (para la frecuencia)
-  unsigned long tiempoActual = millis();
-  if (amplitudes[indice] > 512 && tiempoActual - tiempoAnterior > 20) {  // Detectar un cruce por cero
-    frecuencia = 1000.0 / (tiempoActual - tiempoAnterior);  // Calcular frecuencia en Hz
-    tiempoAnterior = tiempoActual;
-  }
+    // Calcular el tiempo entre picos (para la frecuencia)
+    unsigned long tiempoActual = millis();
+    if (amplitudes[i] > 512 && tiempoActual - tiempoAnterior > 20) {  // Detectar un cruce por cero
+      frecuencia = 1000.0 / (tiempoActual - tiempoAnterior);  // Calcular frecuencia en Hz
+      tiempoAnterior = tiempoActual;
 
-  // Avanzar el índice del arreglo, si llegamos al límite, reiniciar
-  indice = (indice + 1) % tamanoMuestras;
+      // Imprimir la frecuencia en el monitor serial (Esto es para ver que todo va bien)
+      Serial.print("Frecuencia: ");
+      Serial.print(frecuencia);
+      Serial.println(" Hz");
+    }
+
+    // Introducir un pequeño retardo entre lecturas para evitar que se tomen todas al instante
+    delay(10);
+  }
 }
 
 // Función para identificar la forma de la onda
@@ -131,8 +163,6 @@ void mostrarCaracteristicasCiclicas() {
 
 // Función para mostrar los resultados en la pantalla LCD
 void mostrarResultados() {
-  // Detener la adquisición mientras se muestran los resultados
-  adquisicionIniciada = false;
 
   // Identificar la forma de la onda
   identificarFormaOnda();
@@ -141,38 +171,27 @@ void mostrarResultados() {
   amplitud = (amplitudMax - amplitudMin) * (5.0 / 1023.0);  // Convertir a voltios
 
   // Mostrar características cíclicamente hasta que el usuario pulse el botón de inicio
-  while (digitalRead(pinBotonInicio) == HIGH) {
+  int contador = 0;
+  while (digitalRead(pinBotonInicio) == HIGH && contador != 6) {
+    contador = contador+1;
     mostrarCaracteristicasCiclicas();
   }
+  
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Pulsa el boton:");
+    
+    lcd.setCursor(0, 1);
+    lcd.print("INICIO");
 
   // Reiniciar las variables de adquisición
   amplitudMax = 0;
   amplitudMin = 1023;
   tiempoAnterior = 0;
-  adquisicionIniciada = true;  // Reanudar adquisición
 }
 
-// Función principal que corre en bucle
-void loop() {
-  // Verificar si el botón de inicio fue presionado (se leerá LOW cuando esté presionado)
-  if (digitalRead(pinBotonInicio) == LOW) {
-    adquisicionIniciada = true;
-    lcd.clear();
-    lcd.print("Adquiriendo...");
-    delay(200);  // Pequeño retardo para evitar lecturas múltiples al presionar el botón (debouncing)
-  }
 
-  // Verificar si la adquisición está en marcha
-  if (adquisicionIniciada) {
-    adquirirSenal();  // Adquirir y procesar la señal
 
-    // Verificar si el botón de mostrar fue presionado
-    if (digitalRead(pinBotonMostrar) == LOW) {
-      mostrarResultados();  // Mostrar los resultados en pantalla
-      delay(200);  // Pequeño retardo para evitar lecturas múltiples (debouncing)
-    }
-  }
-}
 
 // Función para liberar la memoria asignada dinámicamente al finalizar el programa
 void finalizar() {
