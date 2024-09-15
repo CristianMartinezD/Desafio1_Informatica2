@@ -10,7 +10,8 @@ const int pinBotonMostrar = 8;       // Botón para mostrar información
 
 // Variables para la adquisición de señal
 float* amplitudes;   // Puntero para el arreglo dinámico de amplitudes
-int tamanoMuestras = 40;  // Número de muestras para la señal
+float* segundasDerivadas; // Puntero para almacenar las segundas derivadas
+int tamanoMuestras = 60;  // Número de muestras para la señal
 float amplitudMax = 0;
 float amplitudMin = 1023;
 float amplitud = 0;
@@ -31,14 +32,13 @@ void setup() {
   pinMode(pinBotonInicio, INPUT_PULLUP);
   pinMode(pinBotonMostrar, INPUT_PULLUP);
 
-  // Inicializar memoria dinámica para las amplitudes
+  // Inicializar memoria dinámica para las amplitudes y segundas derivadas
   amplitudes = new float[tamanoMuestras];  // Reserva memoria para el arreglo dinámico
+  segundasDerivadas = new float[tamanoMuestras - 2]; // Reserva para las segundas derivadas
   
   // Inicializar comunicación serial
   Serial.begin(9600);  // Configura la velocidad de comunicación serial a 9600 baudios
 }
-
-
 
 // Función principal que corre en bucle
 void loop() {
@@ -46,7 +46,7 @@ void loop() {
   if (digitalRead(pinBotonInicio) == LOW) {
     lcd.clear();
     lcd.print("Adquiriendo...");
-    adquirirSenal();  // Ahora adquirimos las 40 muestras cuando se presiona el botón
+    adquirirSenal();  // Ahora adquirimos las 60 muestras cuando se presiona el botón
     delay(200);  // Pequeño retardo para evitar lecturas múltiples al presionar el botón
   }
 
@@ -57,15 +57,13 @@ void loop() {
   }
 }
 
-
-
-
 // Función para la adquisición de la señal analógica
 void adquirirSenal() {
-  // Leer 40 muestras consecutivamente
+  // Leer 60 muestras consecutivamente
   for (int i = 0; i < tamanoMuestras; i++) {
     // Lee el valor de la señal analógica y lo almacena en el arreglo
     amplitudes[i] = analogRead(pinEntradaAnalogica);
+    Serial.println(amplitudes[i]);  // Imprimir las amplitudes en el monitor serial
 
     // Actualizar el valor máximo y mínimo de la señal
     if (amplitudes[i] > amplitudMax) {
@@ -80,11 +78,6 @@ void adquirirSenal() {
     if (amplitudes[i] > 512 && tiempoActual - tiempoAnterior > 20) {  // Detectar un cruce por cero
       frecuencia = 1000.0 / (tiempoActual - tiempoAnterior);  // Calcular frecuencia en Hz
       tiempoAnterior = tiempoActual;
-
-      // Imprimir la frecuencia en el monitor serial (Esto es para ver que todo va bien)
-      Serial.print("Frecuencia: ");
-      Serial.print(frecuencia);
-      Serial.println(" Hz");
     }
 
     // Introducir un pequeño retardo entre lecturas para evitar que se tomen todas al instante
@@ -92,45 +85,35 @@ void adquirirSenal() {
   }
 }
 
-// Función para identificar la forma de la onda
-void identificarFormaOnda() {
-  int cambiosAbruptos = 0;
-  int pendientesPositivas = 0;
-  int pendientesNegativas = 0;
-  bool pendienteConstante = true;  // Para detectar pendientes lineales (triangular)
+// Función para calcular la segunda derivada (en valor absoluto) y contar cuántos elementos son menores que 5
+void identificarFormaOndaSegundaDerivada() {
+  int countMenores5 = 0;  // Contador para elementos menores que 5
 
-  // Analizamos las muestras en el arreglo para detectar la forma de la onda
-  for (int i = 1; i < tamanoMuestras; i++) {
-    float pendiente = amplitudes[i] - amplitudes[i - 1];
+  // Calcular la segunda derivada en valor absoluto
+  for (int i = 2; i < tamanoMuestras; i++) {
+    // Calcular la segunda derivada como la magnitud absoluta de las diferencias
+    float segundaDerivada = abs(amplitudes[i]) - 2 * abs(amplitudes[i - 1]) + abs(amplitudes[i - 2]);
+    segundasDerivadas[i - 2] = abs(segundaDerivada);  // Guardar la segunda derivada en valor absoluto
 
-    // Contar cuántas veces hay un cambio de pendiente brusco
-    if (abs(pendiente) > 200) {
-      cambiosAbruptos++;
-    }
-
-    // Contar cuántas veces la pendiente es positiva o negativa
-    if (pendiente > 0) {
-      pendientesPositivas++;
-    } else if (pendiente < 0) {
-      pendientesNegativas++;
-    }
-
-    // Detectar si la pendiente es constante, lo que indicaría una onda triangular
-    if (i > 1) {
-      float pendienteAnterior = amplitudes[i - 1] - amplitudes[i - 2];
-      if (abs(pendiente - pendienteAnterior) > 10) {  // Detectar si la pendiente cambia drásticamente
-        pendienteConstante = false;
-      }
+    // Si la segunda derivada es menor que 5, incrementar el contador
+    if (abs(segundaDerivada) < 5) {
+      countMenores5++;
     }
   }
 
-  // Identificar forma de onda basándonos en los cambios en las pendientes
-  if (cambiosAbruptos > tamanoMuestras * 0.5) {
-    formaOnda = "Cuadrada";  // Muchos cambios bruscos indican onda cuadrada
-  } else if (pendienteConstante && pendientesPositivas == pendientesNegativas) {
-    formaOnda = "Triangular";  // Si la pendiente es constante y sube/baja de manera equilibrada
+  // Imprimir las segundas derivadas en el monitor serial
+  Serial.println("Segundas derivadas:");
+  for (int i = 0; i < tamanoMuestras - 2; i++) {
+    Serial.print(segundasDerivadas[i]);
+    if (i < tamanoMuestras - 3) Serial.print(", ");  // Imprimir coma entre elementos
+  }
+  Serial.println();  // Nueva línea al final del arreglo
+
+  // Identificar la forma de la onda basada en el número de elementos menores que 5
+  if (countMenores5 > 10) {
+    formaOnda = "Triangular";
   } else {
-    formaOnda = "Senoidal";  // Si las pendientes cambian suavemente, es onda senoidal
+    formaOnda = "Senoidal";
   }
 }
 
@@ -163,9 +146,8 @@ void mostrarCaracteristicasCiclicas() {
 
 // Función para mostrar los resultados en la pantalla LCD
 void mostrarResultados() {
-
-  // Identificar la forma de la onda
-  identificarFormaOnda();
+  // Identificar la forma de la onda usando la segunda derivada
+  identificarFormaOndaSegundaDerivada();
 
   // Calcular amplitud pico a pico
   amplitud = (amplitudMax - amplitudMin) * (5.0 / 1023.0);  // Convertir a voltios
@@ -173,16 +155,15 @@ void mostrarResultados() {
   // Mostrar características cíclicamente hasta que el usuario pulse el botón de inicio
   int contador = 0;
   while (digitalRead(pinBotonInicio) == HIGH && contador != 6) {
-    contador = contador+1;
+    contador++;
     mostrarCaracteristicasCiclicas();
   }
   
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Pulsa el boton:");
-    
-    lcd.setCursor(0, 1);
-    lcd.print("INICIO");
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Pulsa el boton:");
+  lcd.setCursor(0, 1);
+  lcd.print("INICIO");
 
   // Reiniciar las variables de adquisición
   amplitudMax = 0;
@@ -190,10 +171,8 @@ void mostrarResultados() {
   tiempoAnterior = 0;
 }
 
-
-
-
 // Función para liberar la memoria asignada dinámicamente al finalizar el programa
 void finalizar() {
-  delete[] amplitudes; 
+  delete[] amplitudes;
+  delete[] segundasDerivadas;
 }
